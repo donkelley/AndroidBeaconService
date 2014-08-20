@@ -1,0 +1,53 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.paywith.beacons"
+    android:versionCode="1"
+    android:versionName="1.0" >
+
+    <uses-sdk
+        android:minSdkVersion="18"
+        android:targetSdkVersion="19" />
+
+	<!-- service running persistently in background on phone startup -->
+	<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+	<uses-permission android:name="android.permission.WAKE_LOCK" />
+	<uses-permission android:name="android.permission.GET_TASKS" />
+	
+    <application
+        android:allowBackup="true"
+        android:theme="@style/AppTheme" >
+    <service
+        android:enabled="true"
+        android:exported="true"
+        android:isolatedProcess="false"
+        android:label="iBeacon"
+        android:name="com.radiusnetworks.ibeacon.service.IBeaconService">
+	        
+	    <intent-filter>
+	        <action android:name="android.intent.action._BOOT_COMPLETED" />
+	    </intent-filter>
+    	</service>
+    <service
+        android:enabled="true"
+        android:name="com.radiusnetworks.ibeacon.IBeaconIntentProcessor">
+        
+	    <intent-filter>
+	        <action android:name="android.intent.action._BOOT_COMPLETED" />
+	    </intent-filter>
+        </service>
+        
+    <!-- how to make receiver start on bootup of phone:
+    <service android:enabled="true" android:name=".MyService">
+        <intent-filter>
+            <action android:name="james.jamesspackage.MyService" />
+        </intent-filter>
+        </service>
+    <receiver android:name="james.jamesspackage.MyBroadcastReceiver">
+        <intent-filter>
+            <action android:name="android.intent.action.BOOT_COMPLETED" />
+            <category android:name="android.intent.category.HOME" />
+        </intent-filter>
+    </receiver>
+     -->
+    </application>
+</manifest>
+
