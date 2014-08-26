@@ -25,6 +25,7 @@ package com.radiusnetworks.ibeacon.service;
 
 import android.annotation.TargetApi;
 import android.app.ActivityManager;
+import android.app.KeyguardManager;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -47,7 +48,10 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.PowerManager;
 import android.provider.ContactsContract;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.app.NotificationCompat.Builder;
 import android.util.Log;
+import android.view.WindowManager;
 
 import com.paywith.beacons.R;
 import com.radiusnetworks.bluetooth.BluetoothCrashResolver;
@@ -57,6 +61,7 @@ import com.radiusnetworks.ibeacon.IBeaconManager;
 import com.radiusnetworks.ibeacon.Region;
 
 import java.lang.ref.WeakReference;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -65,6 +70,7 @@ import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -90,8 +96,20 @@ public class IBeaconService extends Service {
     private boolean scanningEnabled = false;
 
 	private static final String PREFERENCES = "com.paywith.paywith";
-	private SharedPreferences settings;
 	private Context context;
+	private SharedPreferences settings;// = context.getSharedPreferences(PREFERENCES, 0);
+	private SharedPreferences.Editor editor;
+	
+	private IBeacon lastBeaconFound = null;
+	private IBeacon lastBeaconFound2 = null;
+	
+	private Integer old_locid = 0;
+	private Integer old_locid2 = 0;
+	
+	private Integer lastlocationid = 0;
+	private String lastaction = "";
+	
+	private Integer noPaywithBeaconCount = 0;
 	
     /*
      * The scan period is how long we wait between restarting the BLE advertisement scans
@@ -147,6 +165,8 @@ public class IBeaconService extends Service {
     public static final int MSG_SET_SCAN_PERIODS = 6;
     public static final int MSG_SET_DO_LOCK = 7;
     public static final int MSG_SET_DO_UNLOCK = 8;
+    public static final int MSG_START_SCANNING = 9;
+    public static final int MSG_STOP_SCANNING = 10;
 
 
 	Map<String, String> apiresult = null;  
@@ -201,6 +221,14 @@ public class IBeaconService extends Service {
                         if (lock.isHeld())
                             lock.release();
                     break;
+                    case MSG_START_SCANNING:
+                        Log.i(TAG, "start scanning received");
+                        service.startScanning(new com.radiusnetworks.ibeacon.service.Callback(startRMData.getCallbackPackageName()));
+                    break;
+                    case MSG_STOP_SCANNING:
+                        Log.i(TAG, "stop scanning received");
+                        service.stopScanning(new com.radiusnetworks.ibeacon.service.Callback(startRMData.getCallbackPackageName()));
+                    break;
                     default:
                         super.handleMessage(msg);
                 }
@@ -238,10 +266,8 @@ public class IBeaconService extends Service {
         bluetoothCrashResolver = new BluetoothCrashResolver(this);
         bluetoothCrashResolver.start();
         
-        apiInstance = new PayWithAPI(this.getBaseContext());
-    	//PayWithAPI apiInstance = new PayWithAPI(this.getBaseContext());
-        apiInstance.setCurrentLaunchUrl("");
-
+        setupApiConnection();
+        
         // Look for simulated scan data
         try {
             Class klass = Class.forName("com.radiusnetworks.ibeacon.SimulatedScanData");
@@ -257,15 +283,27 @@ public class IBeaconService extends Service {
         IntentFilter theFilter = new IntentFilter();
         theFilter.addAction(Intent.ACTION_SCREEN_OFF);
         theFilter.addAction(Intent.ACTION_SCREEN_ON);
+        this.context = this.getBaseContext();
+        settings = context.getSharedPreferences(PREFERENCES, 0);
+        editor = settings.edit();
     }
 
+    private void setupApiConnection() {
+    	// this needs to happen not only during onCreate but also when restarting a beacon searching routine after logging in
+        apiInstance = new PayWithAPI(this.getBaseContext());
+    	//PayWithAPI apiInstance = new PayWithAPI(this.getBaseContext());
+        apiInstance.setCurrentLaunchUrl("");
+    }
+    
     @Override
     @TargetApi(18)
     public void onDestroy() {
+    	Log.e("service","onDestroy()");
         if (android.os.Build.VERSION.SDK_INT < 18) {
             Log.w(TAG, "Not supported prior to API 18.");
             return;
         }
+		setNextLaunchUrl(null);
         bluetoothCrashResolver.stop();
         Log.i(TAG, "onDestroy called.  stopping scanning");
         handler.removeCallbacksAndMessages(null);
@@ -274,6 +312,10 @@ public class IBeaconService extends Service {
             bluetoothAdapter.stopLeScan((BluetoothAdapter.LeScanCallback)getLeScanCallback());
             lastScanEndTime = new Date().getTime();
         }
+        // remove any remaining system notifications that this service has generated
+		NotificationManager notificationManager = (NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+		notificationManager.cancelAll();
+
     }
 
     private int ongoing_notification_id = 1;
@@ -285,10 +327,40 @@ public class IBeaconService extends Service {
         if (IBeaconManager.debug) Log.d(TAG, "bound client count:" + bindCount);
         return bindCount == 0;
     }
+    
+
+	
+	public Boolean getUserLoggedIn() {
+		// Don Kelley, Aug 2014
+		return settings.getBoolean("userLoggedIn",  false);
+	}
+	
+	public void setNextLaunchUrl(String mLaunchURL) {
+		// Don Kelley, August 2014
+		editor.putString("currentLaunchUrl", mLaunchURL);
+		editor.commit();
+	}
+	
+	public void setNextLaunchName(String mMerchantName) {
+		// Don Kelley, August 2014
+		editor.putString("MerchantName", mMerchantName);
+		editor.commit();
+	}
 
     /**
      * methods for clients
      */
+	
+	public void startScanning(Callback callback) {
+        setupApiConnection();
+		if (getUserLoggedIn()) {
+	        enableScanning();
+		}
+	}
+	
+	public void stopScanning(Callback callback) {
+	    disableScanning();
+	}
 
     public void startRangingBeaconsInRegion(Region region, Callback callback) {
         synchronized (rangedRegionState) {
@@ -300,7 +372,7 @@ public class IBeaconService extends Service {
         }
         if (IBeaconManager.debug)
             Log.d(TAG, "Currently ranging " + rangedRegionState.size() + " regions.");
-        if (!scanningEnabled) {
+        if (!scanningEnabled && getUserLoggedIn()) {
             enableScanning();
         }
     }
@@ -577,6 +649,12 @@ get lock
     }
 
     private void processRangeData() {
+    	// always check if user logged in before continuing
+    	if (!getUserLoggedIn()) {
+    		Log.e("processRangeData() ","user logged out");
+            disableScanning();
+            return;
+    	}
         Iterator<Region> regionIterator = rangedRegionState.keySet().iterator();
         while (regionIterator.hasNext()) {
             Region region = regionIterator.next();
@@ -588,38 +666,208 @@ get lock
                 Log.e("IBeaconService","Launching PayWith App at this location");
             	// only launch app if it's not in foreground already.  if it's in foreground it will check for beacons by itself...
             	//runAppAPI();
-            	//launchApp();// We want to actually launch the app here, not make an api call only.
+            	//
             	// THIS NEEDS TO BE A PREFERENCE - (off by default?)... it's very annoying.
             } else {
             	Log.e("IBeaconService","Updating already front-most PayWith App at this location");
             }*/
+        	//Log.e("iterator",trackedBeacons);
         	IBeacon nearest_beacon = findNearest(trackedBeacons);
+
         	if (nearest_beacon == null) {
-        		Log.e("nearest_beacon() result","no beacon found");
+        		//Log.e("nearest_beacon() result","no beacon found");
+    			// if no paywith beacon nearby, remove any of our notifications.
+        		// Need this to only happen after several iterations of no beacon found.... 
+        		noPaywithBeaconCount = noPaywithBeaconCount + 1; // inc the counter and remove notification if higher than 10 cycles
+        		
+        		if (noPaywithBeaconCount > 10) {
+        			// clear all paywith notifications... nothing has been found for 10 cycles
+        			NotificationManager notificationManager = (NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
+        			notificationManager.cancelAll();
+        			old_locid = 0;
+        			old_locid2 = 0;
+        			lastBeaconFound = null;
+        			lastBeaconFound2 = null;
+        			lastaction = "cancelAll";
+        			setNextLaunchUrl(null);
+        		}
         		return;
         	}
+        	noPaywithBeaconCount = 0; // always reset the sequential nobeaconsfound counter when a paywith beacon is found
+        	
+        	Integer m1 = nearest_beacon.getMinor();
+        	Integer M1 = nearest_beacon.getMajor();
+        	Integer m2 = 0;
+        	Integer M2 = 0;
+        	Integer m3 = 0;
+        	Integer M3 = 0;
+        	if (lastBeaconFound != null) {
+        		m2 = lastBeaconFound.getMinor();
+        		M2 = lastBeaconFound.getMajor();
+        	}
+
+        	if (lastBeaconFound2 != null) {
+        		m3 = lastBeaconFound2.getMinor();
+        		M3 = lastBeaconFound2.getMajor();
+        	}
+
+			//Log.e("service",m1.toString() + " = " + m2.toString() + " = " + m3.toString() + ", " + M1.toString() + " = " + M2.toString() + " = " + M3.toString());
+    		lastBeaconFound2 = lastBeaconFound;
+    		lastBeaconFound = nearest_beacon;
+    		
+    		//Log.e("matching?",m1.toString() + " = " + m2.toString() + ", " + M1.toString() + " = " + M2.toString());
+        	if (!m1.equals(m2) || !M1.equals(M2) || !m2.equals(m3) || !M2.equals(M3)) {
+        		// simple double-shot debouncer queue:
+        		// We only get past this point if beacon found is same as last beacon found and also the one before that.
+        		//Log.e("processRangeData() ","beacon changed id within last 3 scans... not proceeding");
+        		return;
+        	}
+        	
+        	
         	Integer thisminor = nearest_beacon.getMinor();
         	String muuid = nearest_beacon.getProximityUuid();
         	Integer mmajor = nearest_beacon.getMajor();
         	Integer mminor = nearest_beacon.getMinor();
         	Double distance = nearest_beacon.getAccuracy();
-        	//if (distance < 1) {
-        	// distance handling is done in nearest_beacon() now...
-    		Log.e("IBeaconService","*** mminor=" + mminor.toString() + ", distance =" + distance.toString());
-        	Map<String, String> beaconApiData = runAppAPI("beaconInfoRequest", muuid, mmajor.toString(), mminor.toString());
-	        	//if (beaconApiData == null) {
-	        		// user is not logged in or similar problem
-	        	//	Log.e("IBeaconService API call","unrecognized beacon");
-	        	//}// else {
-	        		// we have beacon data from api - handle it
-	        		// probably best to open app at with the app_redirect_url appended to the base url:
-	        		//String openAppAtURL = null;
-	        	//	Log.e("IBeaconService - opening app at url",beaconApiData);
-	        	//}
-        	//} else {
-        	//	Log.e("IBeaconService","mminor=" + mminor.toString() + ", distance =" + distance.toString());
-        	//}
-            //(); // launch app!!
+
+        	String last_updated_at = null; // need to do the date formatting below.
+        	String current_datetime = null;
+        	String beaconurl;
+    		String beaconname;
+    		Integer location_id;
+    		// also need to store results of this api beacon call in sharedprefs and check
+    		// if data for a found beacon exists there and use that data before making a
+    		// possibly unneccessary api callback about it.
+    		
+    		// note: I need to do something like this still (from iOS app):
+
+        	String format = "yyyy-MM-dd HH:mm:ss Z";
+    	    SimpleDateFormat sdf = new SimpleDateFormat(format, Locale.US);
+    	    //System.out.format("%30s %s\n", format, sdf.format(new Date(0)));
+    	    //sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+    	    current_datetime = sdf.format(new Date(0));
+
+    	    //System.out.format("%30s %s\n", format, sdf.format(new Date(0)));
+    	 
+    				 
+    	    // Set a Beacon Shell object into UserHelper with last updated at of right now
+    	    // so that we do not query for this Beacon again until +24hours since we do not want to overwhelm device
+    	    /*NSDateFormatter *dateFormatter = [[NSDateFormatter alloc]init];
+    	    [dateFormatter setDateFormat:DATE_FORMAT];
+    	    NSString *last_updated_at = [dateFormatter stringFromDate:[NSDate date]];*/
+    		// the call should include last_updated_at, @"last_updated_at
+        	
+        	// experimenting with storing in my new sqlite db and looking for existing records there before hitting api
+
+            DatabaseHandler db = new DatabaseHandler(this);
+             
+            /**
+             * CRUD Operations
+             * */
+            
+            //Log.e("Select:", "Looking for beacon in db..");
+            BeaconStore foundBeacon = db.getBeacon(muuid, mmajor, mminor);
+
+            // Read all beacons
+            /*Log.e("Reading: ", "Reading all beacons.."); 
+            List<BeaconStore> beacons = db.getAllBeacons();       
+             
+            for (BeaconStore cn : beacons) {
+                String log = "Id: "+cn.getID()+" ,uuid: " + cn.getUuid() + " ,major: " + cn.getMajor() + " ,minor: " + cn.getMinor();
+                    // Writing Contacts to log
+                Log.e("Beacon: ", log);
+            }*/
+            
+            // beacon isn't in our phone database so poll api about it
+            if (foundBeacon == null) {
+            	Log.e("Service","Making API Call");
+                //if (distance < 1) {
+                // distance handling is done in nearest_beacon() now...
+                //Log.e("IBeaconService","*** mminor=" + mminor.toString() + ", distance =" + distance.toString());
+                Map<String, String> beaconApiData = runAppAPI("beaconInfoRequest", muuid, mmajor.toString(), mminor.toString());
+
+                //Log.e("Insert: ", "Inserting beacon from api results.."); 
+                //String mername = beaconApiData.get("name");
+                //Integer locid = Integer.parseInt(beaconApiData.get("location_id"));
+                //String url = beaconApiData.get("url");  
+                
+        		beaconurl = beaconApiData.get("url");
+        		beaconname = beaconApiData.get("name");
+        		location_id = Integer.parseInt(beaconApiData.get("location_id"));  		
+
+                // Insert Beacon
+                db.addBeacon(new BeaconStore(muuid, mmajor, mminor, current_datetime, beaconname, location_id, beaconurl));
+                
+            } else {
+
+            	//Log.e("Service","!*!*! NOT Making API Call - beacon already in our sql db!");
+
+        		beaconurl = foundBeacon.getUrl();
+        		beaconname = foundBeacon.getMerchantName();
+        		location_id = foundBeacon.getLocationId();   
+            }
+            //Log.e("ibeaconservice","about to send data to app");
+            //Log.e("beaconurl"," " + beaconurl);
+        	if (beaconurl != null && beaconurl != "signinfailure") {
+        		// force open app at payment page:
+        		//Log.e("service","beaconurl = " + beaconurl);
+        		String previousNotificationUrl = apiInstance.getCurrentLaunchUrl();
+    			// only generate notification if it's different from the last one
+    			String notetext = "Pay with your phone";
+    			notetext = notetext + " at " + beaconname;
+    			
+    			//Log.e("service","lastaction=" + lastaction + ", lastlocationid=" + lastlocationid.toString() + ", location_id=" + location_id.toString());
+    			//Log.e("locid before N/1/2",location_id+"/"+old_locid+"/"+old_locid2);
+				// if location_id has changed from last two sent by a notification in this background service:
+				if (location_id.equals(old_locid) && old_locid.equals(old_locid2)){
+					//old_locid = location_id;
+					PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+					KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+		            boolean isScreenOn = powerManager.isScreenOn();
+					boolean keyboardLocked = km.inKeyguardRestrictedInputMode();
+		              
+        			if (isForeground("com.paywith.paywith") && isScreenOn && !keyboardLocked) {
+        				// only if the app is running main on your phone AND phone is currently unlocked
+
+        				// only do this if:
+        				// the last thing this service did was NOT send a location id
+        				// OR the last thing this service did was NOT send this same location change
+
+        				if (!lastaction.equals("moveLocationToTop") || 
+        						lastaction.equals("moveLocationToTop") && !lastlocationid.equals(location_id)) {
+
+            				//Log.e("service","sending new location to locationlist:" + location_id.toString());
+        					// tell app to move this location to top of location list if possible
+        					moveLocationToTop(location_id.toString());
+        				}
+        				lastaction = "moveLocationToTop";
+        			} else {
+        				// only if app is running in background or not running at all.
+
+        				// only do this if:
+        				// the last thing this service did was NOT send a location id
+        				// OR the last thing this service did was NOT send this same location change
+        				// ALSO only notify if this location hasn't been notified within last hour.  (still necessary?  not sure...)
+        				// (trying without the hour thing for now).
+
+        				if (!lastaction.equals("generateNotification") ||
+        						lastaction.equals("generateNotification") && !lastlocationid.equals(location_id)) { // add hour timer here also        					
+        				
+        					// generate notification.
+        					generateNotification("Pay Here",notetext, beaconurl, location_id.toString());// this generates system notification
+        					setNextLaunchUrl(beaconurl);
+        					setNextLaunchName(beaconname);
+        					lastaction = "generateNotification";
+        				}// else {
+        					//Log.e("service","skipping generateNotification because same as last sent event");
+        				//}
+        			}
+        			lastlocationid = location_id;
+				}
+				// update location_id queue history
+    			old_locid2 = old_locid;
+    			old_locid = location_id;	
+        	}
         }
 
     }
@@ -638,7 +886,21 @@ get lock
 
     private void processIBeaconFromScan(IBeacon iBeacon) {
         //if (IBeaconManager.debug) Log.d(TAG,"iBeacon detected multiple times in scan cycle :" + iBeacon.getProximityUuid() + " "+ iBeacon.getMajor() + " " + iBeacon.getMinor());
-        lastIBeaconDetectionTime = new Date();
+        //Log.e("ibeacon?","test");
+
+    	// check for uuid = 5e6e6190-0b83-0132-9a3d-12313d1ca6ab (paywith beacon uuid) or skip:
+    	// note: estimote default uuid is B9407F30-F5F8-466E-AFF9-25556B57FE6D
+    	// note: radius default uuid is 52414449-5553-4E45-5457-4F524B53434F
+    	// note: IOD default uuid is 
+    	//Log.w("check if paywithbeacon",iBeacon.getProximityUuid().toString().toUpperCase());
+    	if (!iBeacon.getProximityUuid().toString().toUpperCase().equals("B9407F30-F5F8-466E-AFF9-25556B57FE6D") &&
+    			!iBeacon.getProximityUuid().toString().toUpperCase().equals("5E6E6190-0B83-0132-9A3D-12313D1CA6AB")) {
+    		// not our beacon?  don't include it!
+    		//Log.w("check result","not paywith");
+    		return;
+    	}
+    	
+    	lastIBeaconDetectionTime = new Date();
         trackedBeaconsPacketCount++;
         if (trackedBeacons.contains(iBeacon)) {
             if (IBeaconManager.debug)
@@ -647,7 +909,6 @@ get lock
         trackedBeacons.add(iBeacon);
         if (IBeaconManager.debug)
             Log.d(TAG,"iBeacon detected :" + iBeacon.getProximityUuid() + " " + iBeacon.getMajor() + " " + iBeacon.getMinor());
-        //launchApp();
         //runAppAPI();
         List<Region> matchedRegions = null;
         synchronized(monitoredRegionState) {
@@ -736,93 +997,92 @@ get lock
     }
 
     private Map<String, String> runAppAPI(String sent_action, String muuid, String mmajor, String mminor) {
-		Log.e("IBeaconService","runAppAPI() sent_action=" + sent_action);
+		//Log.e("IBeaconService","runAppAPI() sent_action=" + sent_action);
     	// call this to access the main paywith app API callbacks.
     	//call like this:
+    	//Log.e("IBeaconService","runAppAPI");
     	//	runAppAPI("beaconInfoRequest", muuid, mmajor, mminor);
     	if (sent_action.equals("beaconInfoRequest")) {
-    		Log.e("IBeaconService apiInstance created","sent_action = beaconInfoResult");
+    		//Log.e("IBeaconService apiInstance created","sent_action = beaconInfoResult");
     		apiresult = apiInstance.getBeacon(muuid,  mmajor,  mminor);
     		if (apiresult == null) {
+    			//Log.e("IBeaconService:runAppAPI","apiresult == null");
     			return null;
     		}
-    		String beaconurl = apiresult.get("url");
-    		String beaconname = apiresult.get("name");
-    		String location_id = apiresult.get("location_id");
-        	Log.e("callbackresult", " " + apiresult);
-        	if (beaconurl != null && beaconurl != "signinfailure") {
-        		// force open app at payment page:
-        		//launchApp(apiresult);
-        		// generate notification to launch app at payment page:
-        		// note: need to get back more info from apiresult like merchant name
-        		//settings = context.getSharedPreferences(PREFERENCES, 0);
-            	//PayWithAPI apiInstance = new PayWithAPI(this.getBaseContext());
-        		String previousNotificationUrl = apiInstance.getCurrentLaunchUrl();
-        		Log.e("IBeaconService","***** previousURL=" + previousNotificationUrl);
-        		Log.e("IBeaconService","***** new     URL=" + beaconurl);
-        		//if (!previousNotificationUrl.equals(beaconurl)) {
-        			Log.e("IBeaconService","*** generating notification");
-        			// only generate notification if it's different from the last one
-        			String notetext = "Pay with your phone";
-        			if (beaconname != "") {
-        				notetext = notetext + " at " + beaconname;
-        			}
-        			if (isForeground("com.paywith.paywith")) {
-        				// only if the app is running main on your phone:
-        				moveLocationToTop(location_id);// this should tell app to reorder location list
-        			}
-        			generateNotification("Pay Here",notetext, beaconurl, location_id);// this generates system notification
-        			//apiInstance.setCurrentLaunchUrl(apiresult);
-        		/*} else {
 
-        			Log.e("IBeaconService","*** NOT generating notification");
-        			Log.e("apiresult",beaconurl);
-        			Log.e("previousNotificationUrl",previousNotificationUrl);
-        		}*/
-        		
-        	} else {
-        		apiresult = null;
-        	}
+    		String beaconname = apiresult.get("name");
+    		if (beaconname == "") {
+    			// need beaconname for this to be of any use
+    			return null;
+    		}
+    		
     	}
 
     	return apiresult;
     }
     
     protected void generateNotification(String title, String merchanttext, String murl, String location_id) {
-    	Log.e("IBeaconService", "generateNotification");
     	
     	String ns = Context.NOTIFICATION_SERVICE;
         NotificationManager mNotificationManager = (NotificationManager) getSystemService(ns);
 
+    	Builder mNotifyBuilder = new NotificationCompat.Builder(this);
 
-        int icon = R.drawable.ic_launcher;
-        CharSequence tickerText = "PayWith";
-        long when = System.currentTimeMillis();
+        //int icon = R.drawable.ic_launcher;
+        //CharSequence tickerText = "PayWith";
+        //long when = System.currentTimeMillis();
 
-        @SuppressWarnings("deprecation")
-		Notification notification = new Notification(icon,
-                tickerText, when);
-        notification.flags |= Notification.FLAG_AUTO_CANCEL;
+        //@SuppressWarnings("deprecation")
+		//Notification notification = new Notification(icon,
+        //        tickerText, when);
+
+    	mNotifyBuilder.setContentText(merchanttext)
+    		.setContentTitle(title)
+    	    .setSmallIcon(R.drawable.ic_launcher);//logo
+    	
+        //notification.flags |= Notification.FLAG_AUTO_CANCEL;
         Context context = getApplicationContext();
-        CharSequence contentTitle = title;
-        CharSequence contentText = merchanttext;
-
     	Intent notificationIntent = new Intent("android.intent.category.LAUNCHER");
+        //CharSequence contentTitle = title;
+        //CharSequence contentText = merchanttext;
+
     	notificationIntent.putExtra("OpenUrl", murl);
-    	//notificationIntent.putExtra("location_id", location_id);
+    	notificationIntent.putExtra("MerchantName", merchanttext);
     	notificationIntent.setClassName("com.paywith.paywith", "com.paywith.paywith.MainActivity");
 
-        PendingIntent contentIntent = PendingIntent
-                .getActivity(context, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT);
+        //PendingIntent contentIntent = PendingIntent
+       //         .getActivity(context, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT);
 
-        notification.setLatestEventInfo(context, contentTitle,
-                contentText, contentIntent);
+        //notification.setLatestEventInfo(context, contentTitle,
+        //        contentText, contentIntent);
 
-        mNotificationManager.notify(ongoing_notification_id, notification);
+        //mNotificationManager.notify(ongoing_notification_id, notification);
+        
+    	PendingIntent contentIntent = PendingIntent
+    		                .getActivity(context, 0, notificationIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT);
+    	// PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT
+
+    	// this gives us flexibility to add vibration and sound etc:
+    	Notification note = mNotifyBuilder.build();
+
+    	// THIS line is what makes the notification tappable to launch app and generate mCard payment:
+    	note.setLatestEventInfo(context, title, merchanttext, contentIntent);
+
+    	// make phone vibrate and make sound on notification:
+        note.defaults |= Notification.DEFAULT_VIBRATE;
+        note.defaults |= Notification.DEFAULT_SOUND;
+        
+        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        //Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP
+
+        note.flags |= Notification.FLAG_AUTO_CANCEL;
+	    // Because the ID remains unchanged, the existing notification is updated.
+        mNotificationManager.notify(ongoing_notification_id, note);
+    	//Log.e("notification","sent");
     }
     
     protected void moveLocationToTop(String location_id) {
-
     	Intent intent = new Intent("android.intent.category.LAUNCHER");
     	intent.setClassName("com.paywith.paywith", "com.paywith.paywith.MainActivity");
     	intent.putExtra("location_id", location_id);
@@ -878,7 +1138,7 @@ get lock
     	return false;
     }
 	
-	protected IBeacon findNearest(Collection<IBeacon> beacons) {
+	protected synchronized IBeacon findNearest(Collection<IBeacon> beacons) {
 		// must convert linkedhashmap to map for looping through data
 		//Map<String, Beacon> beaconsMap = beacons; //beacons
 		//Iterator<Entry<String, Beacon>> beaconIt = beacons.entrySet().iterator();
@@ -886,53 +1146,39 @@ get lock
 		Double nearestDistance = IBeaconManager.alertRangeNear;//200.0;
 		// nearestBeacon will be set to the Beacon object whenever it's found to be nearest
 		IBeacon nearestBeacon = null;// = new IBeacon();
-		
-		for (Iterator<IBeacon> iterator = beacons.iterator(); iterator.hasNext();) {
-			IBeacon aBeacon = (IBeacon) iterator.next();
-			Integer minor = aBeacon.getMinor();
-			Double aBeaconDistance = aBeacon.getAccuracy();
-			//Log.d("findNearest", minor.toString() + " :: " + aBeaconDistance.toString());
-			//Long aBeaconTimeScannedEpoch = aBeacon.getTimeScannedEpoch();
-			if (aBeaconDistance < nearestDistance) {
-				//Log.d("nearest EQUALS", minor.toString());
-				// this beacon is closest in list so far... (first beacon in list always at first followed by anything closer)
-				nearestBeacon = aBeacon;
-				nearestDistance = aBeaconDistance;
-			}
-			// if beacon hasn't been scanned for a given period of time, remove it from our hash:
-			//if ((aBeaconTimeScannedEpoch + BeaconForgottenAfterTimeperiod) < System.currentTimeMillis()) {
-				//Log.e(TAG,"deleting beacon from list:" + aBeacon.getMinor().toString());
-				// remove this beacon from our hash - it's been out of range for a while
-				// note: trying to remove from the shared hash, not the local hash
-				//iterator.remove();
-			//}
-		}
-		
-		// loop through beacons hash to find nearest beacon
-		/*while (beaconIt.hasNext()) {
-			Entry<String, Beacon> entry = beaconIt.next();
-			String key = entry.getKey();
-			Beacon aBeacon = entry.getValue();
-			Double aBeaconDistance = aBeacon.getDistance();
-			Long aBeaconTimeScannedEpoch = aBeacon.getTimeScannedEpoch();
-			// is this beacon closer than others in list before it?
-			if (aBeaconDistance < nearestDistance) {
-				// this beacon is closest in list so far... (first beacon in list always at first followed by anything closer)
-				nearestBeacon = aBeacon;
-			}
-			// if beacon hasn't been scanned for a given period of time, remove it from our hash:
-			if ((aBeaconTimeScannedEpoch + BeaconForgottenAfterTimeperiod) < System.currentTimeMillis()) {
-				Log.e(TAG,"deleting beacon from list:" + aBeacon.getMinor().toString());
-				// remove this beacon from our hash - it's been out of range for a while
-				// note: trying to remove from the shared hash, not the local hash
-				//try {
-				beaconIt.remove();//key
-					//break;
-				//} catch () {
-					
-				//}
-			}*/
+		//Collection<IBeacon> beaconsToCheck;
+		//synchronized Collection<IBeacon> beaconsToCheck() {
+			
 		//}
+
+	    /*public synchronized Collection<IBeacon> finalizeIBeacons() {
+	        ArrayList<IBeacon> iBeacons = new ArrayList<IBeacon>();
+	        Map<IBeacon,RangedIBeacon> newRangedIBeacons = new HashMap<IBeacon,RangedIBeacon>();
+
+	        synchronized (rangedIBeacons) {
+	            for (IBeacon iBeacon : rangedIBeacons.keySet()) {
+	            	
+	            	
+	            }
+	        }
+	    }*/
+		synchronized (beacons) {
+			
+			for (Iterator<IBeacon> iterator = beacons.iterator(); iterator.hasNext();) {
+				//Log.e("looping through beacons", "findnearest");
+				IBeacon aBeacon = (IBeacon) iterator.next();
+				Integer minor = aBeacon.getMinor();
+				Double aBeaconDistance = aBeacon.getAccuracy();
+				//Log.d("findNearest", minor.toString() + " :: " + aBeaconDistance.toString());
+				//Long aBeaconTimeScannedEpoch = aBeacon.getTimeScannedEpoch();
+				if (aBeaconDistance < nearestDistance) {
+					// this beacon is closest in list so far... (first beacon in list always at first followed by anything closer)
+					nearestBeacon = aBeacon;
+					nearestDistance = aBeaconDistance;
+				}
+			}
+
+		}
 		
 		return nearestBeacon;
 	}

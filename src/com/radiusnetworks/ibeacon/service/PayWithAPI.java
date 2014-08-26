@@ -41,6 +41,7 @@ public class PayWithAPI {
 	private SharedPreferences.Editor editor;	
 
 	private String access_token;
+	private Boolean user_logged_in;
 	private String beacon_end_point = "/v1/mobile/beacons.json";
 	private String api_domain;
 	private String app_domain;
@@ -61,14 +62,16 @@ public class PayWithAPI {
 		this.context = context;
 		settings = context.getSharedPreferences(PREFERENCES, 0);
 		access_token = getUserAccessToken();//getAccessToken(); // or getUserAccessToken();???
+		user_logged_in = getUserLoggedIn();
 		api_domain = getApi_domainSetting();
 		app_domain = getApp_domainSetting();
 		policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
 			StrictMode.setThreadPolicy(policy);
 	}
+	
 	protected Map<String, String> getBeacon(String muuid, String mmajor, String mminor) {
 
-		if (access_token == null) {
+		if (access_token == null || user_logged_in == false) {
 			// user is not logged in, exit early from api callback
 			return null;
 		}
@@ -123,6 +126,11 @@ public class PayWithAPI {
 		return settings.getString("user_access_token", null);
 	}
 	
+	public Boolean getUserLoggedIn() {
+		// Don Kelley, Aug 2014
+		return settings.getBoolean("userLoggedIn",  false);
+	}
+	
 	public String getCurrentLaunchUrl() {
 		// Don Kelley, August 2014
 		return settings.getString("currentLaunchUrl",  null);
@@ -149,7 +157,7 @@ public class PayWithAPI {
 			
 			url = api_domain + beacon_end_point + "?access_token=" + access_token;// /native?acces...
 			url2 = "&uuid=" + uuid + "&major_id=" + major_id + "&minor_id=" + minor_id + "&last_updated_at=" + null;//URLEncoder.encode(current_datetime);
-			Log.e("service callAPI()::beaconInfoRequest",url + url2);
+			//Log.e("service callAPI()::beaconInfoRequest",url + url2);
 		}
     	Map<String, String> resultmap = new Hashtable();
 		try {  
@@ -207,7 +215,7 @@ public class PayWithAPI {
 						// TODO Auto-generated catch block
 					//	e.printStackTrace();
 					//}
-Log.e("beacon name",merchant_name);
+//Log.e("beacon name",merchant_name);
 				    app_redirect_url = (String) arr.get("app_redirect_url");
 				    /*last_updated_at = (String) arr.get("last_updated_at");
 				    try {

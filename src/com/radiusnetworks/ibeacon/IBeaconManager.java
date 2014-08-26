@@ -116,11 +116,11 @@ public class IBeaconManager {
     /**
      * The default duration in milliseconds of the bluetooth scan cycle
      */
-    public static final long DEFAULT_FOREGROUND_SCAN_PERIOD = 5200;
+    public static final long DEFAULT_FOREGROUND_SCAN_PERIOD = 1100;
     /**
      * The default duration in milliseconds spent not scanning between each bluetooth scan cycle
      */
-    public static final long DEFAULT_FOREGROUND_BETWEEN_SCAN_PERIOD = 7000;
+    public static final long DEFAULT_FOREGROUND_BETWEEN_SCAN_PERIOD = 0;
     /**
      * The default duration in milliseconds of the bluetooth scan cycle when no ranging/monitoring clients are in the foreground
      */
@@ -130,7 +130,7 @@ public class IBeaconManager {
      */
     public static final long DEFAULT_BACKGROUND_BETWEEN_SCAN_PERIOD = 5*60*1000;
     
-    public static final double DEFAULT_ALERT_RANGE_NEAR = 3.0;
+    public static final double DEFAULT_ALERT_RANGE_NEAR = 12.0;
 
     private long foregroundScanPeriod = DEFAULT_FOREGROUND_SCAN_PERIOD;
     private long foregroundBetweenScanPeriod = DEFAULT_FOREGROUND_BETWEEN_SCAN_PERIOD;
@@ -361,6 +361,60 @@ public class IBeaconManager {
 	}
 	
 	/**
+	 * Tells the <code>IBeaconService</code> to start scanning for iBeacons
+	 *  
+	 * @see IBeaconManager#setMonitorNotifier(MonitorNotifier)
+	 * @see IBeaconManager#stopMonitoringBeaconsInRegion(Region region)
+	 * @see MonitorNotifier 
+	 * @see Region 
+	 * @param region
+	 */
+    @TargetApi(18)
+	public void startScanning(Region region) throws RemoteException {
+        if (android.os.Build.VERSION.SDK_INT < 18) {
+            Log.w(TAG, "Not supported prior to API 18.  Method invocation will be ignored");
+            return;
+        }
+        if (serviceMessenger == null) {
+            throw new RemoteException("The IBeaconManager is not bound to the service.  Call iBeaconManager.bind(IBeaconConsumer consumer) and wait for a callback to onIBeaconServiceConnect()");
+        }
+		Message msg = Message.obtain(null, IBeaconService.MSG_START_SCANNING, 0, 0);
+		StartRMData obj = new StartRMData(new RegionData(region), callbackPackageName(),this.getScanPeriod(), this.getBetweenScanPeriod()  );
+		msg.obj = obj;
+		serviceMessenger.send(msg);
+        //synchronized (monitoredRegions) {
+        //    monitoredRegions.add((Region) region.clone());
+        //}
+	}
+	
+	/**
+	 * Tells the <code>IBeaconService</code> to stop scanning for iBeacons
+	 *  
+	 * @see IBeaconManager#setMonitorNotifier(MonitorNotifier)
+	 * @see IBeaconManager#stopMonitoringBeaconsInRegion(Region region)
+	 * @see MonitorNotifier 
+	 * @see Region 
+	 * @param region
+	 */
+    @TargetApi(18)
+	public void stopScanning() throws RemoteException {
+        if (android.os.Build.VERSION.SDK_INT < 18) {
+            Log.w(TAG, "Not supported prior to API 18.  Method invocation will be ignored");
+            return;
+        }
+        if (serviceMessenger == null) {
+            throw new RemoteException("The IBeaconManager is not bound to the service.  Call iBeaconManager.bind(IBeaconConsumer consumer) and wait for a callback to onIBeaconServiceConnect()");
+        }
+		Message msg = Message.obtain(null, IBeaconService.MSG_STOP_SCANNING, 0, 0);
+		StartRMData obj = new StartRMData(new RegionData(null), callbackPackageName(),this.getScanPeriod(), this.getBetweenScanPeriod()  );
+		msg.obj = obj;
+		serviceMessenger.send(msg);
+        //synchronized (monitoredRegions) {
+        //    monitoredRegions.add((Region) region.clone());
+        //}
+	}
+	
+	/**
 	 * Tells the <code>IBeaconService</code> to start looking for iBeacons that match the passed
 	 * <code>Region</code> object, and providing updates on the estimated distance very seconds while
 	 * iBeacons in the Region are visible.  Note that the Region's unique identifier must be retained to
@@ -389,6 +443,7 @@ public class IBeaconManager {
             rangedRegions.add((Region) region.clone());
         }
 	}
+    
 	/**
 	 * Tells the <code>IBeaconService</code> to stop looking for iBeacons that match the passed
 	 * <code>Region</code> object and providing distance information for them.
