@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.paywith.beacons"
+    package="com.paywith.ibeacon"
     android:versionCode="1"
     android:versionName="1.0" >
 
@@ -20,7 +20,7 @@
         android:exported="true"
         android:isolatedProcess="false"
         android:label="iBeacon"
-        android:name="com.radiusnetworks.ibeacon.service.IBeaconService">
+        android:name="com.paywith.ibeacon.service.IBeaconService">
 	        
 	    <intent-filter>
 	        <action android:name="android.intent.action._BOOT_COMPLETED" />
@@ -28,7 +28,7 @@
     	</service>
     <service
         android:enabled="true"
-        android:name="com.radiusnetworks.ibeacon.IBeaconIntentProcessor">
+        android:name="com.paywith.ibeacon.IBeaconIntentProcessor">
         
 	    <intent-filter>
 	        <action android:name="android.intent.action._BOOT_COMPLETED" />
