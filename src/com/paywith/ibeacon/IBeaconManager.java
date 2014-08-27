@@ -399,7 +399,7 @@ public class IBeaconManager {
 	 * @param region
 	 */
     @TargetApi(18)
-	public void stopScanning() throws RemoteException {
+	public void stopScanning(Region region) throws RemoteException {
         if (android.os.Build.VERSION.SDK_INT < 18) {
             Log.w(TAG, "Not supported prior to API 18.  Method invocation will be ignored");
             return;
@@ -408,7 +408,7 @@ public class IBeaconManager {
             throw new RemoteException("The IBeaconManager is not bound to the service.  Call iBeaconManager.bind(IBeaconConsumer consumer) and wait for a callback to onIBeaconServiceConnect()");
         }
 		Message msg = Message.obtain(null, IBeaconService.MSG_STOP_SCANNING, 0, 0);
-		StartRMData obj = new StartRMData(new RegionData(null), callbackPackageName(),this.getScanPeriod(), this.getBetweenScanPeriod()  );
+		StartRMData obj = new StartRMData(new RegionData(region), callbackPackageName(),this.getScanPeriod(), this.getBetweenScanPeriod()  );
 		msg.obj = obj;
 		serviceMessenger.send(msg);
         //synchronized (monitoredRegions) {

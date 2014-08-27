@@ -631,10 +631,16 @@ get lock
             leScanCallback = new BluetoothAdapter.LeScanCallback() {
                 @Override
                 public void onLeScan(final BluetoothDevice device, final int rssi,final byte[] scanRecord) {
+                	//Log.e("bt","got record");
+                	// DEBUG NOTE FOR BLUETOOTH PROBLEM (Don Kelley August 2014):
+                	// IF THIS NEVER HAPPENS (at least around a real bt broadcasting device), SOMETHING IS WRONG.
                     if (IBeaconManager.debug) Log.d(TAG, "got record");
                         new ScanProcessor().execute(new ScanData(device, rssi, scanRecord));
                 }
             };
+        } else {
+        	//Log.e("bt","NOT got record");
+        	//Log.e("bt",leScanCallback.toString());
         }
 
         return leScanCallback;
@@ -673,6 +679,7 @@ get lock
 
         	//Log.e("iterator",trackedBeacons);
         	IBeacon nearest_beacon = findNearest(trackedBeacons);
+        	Boolean beacon_changed = false;
 
         	if (nearest_beacon == null) {
         		//Log.e("nearest_beacon() result","no beacon found");
@@ -820,8 +827,10 @@ get lock
     			
     			//Log.e("service","lastaction=" + lastaction + ", lastlocationid=" + lastlocationid.toString() + ", location_id=" + location_id.toString());
     			//Log.e("locid before N/1/2",location_id+"/"+old_locid+"/"+old_locid2);
+    			
 				// if location_id has changed from last two sent by a notification in this background service:
-				if (location_id.equals(old_locid) && old_locid.equals(old_locid2)){
+				beacon_changed = (location_id.equals(old_locid) && old_locid.equals(old_locid2));
+				//Log.e("beacon_changed",beacon_changed.toString());
 					//old_locid = location_id;
 					PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
 					KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
@@ -843,7 +852,10 @@ get lock
         					moveLocationToTop(location_id.toString());
         				//}
         				lastaction = "moveLocationToTop";
-        			} else {
+        				//Log.e("sending intent","locations list order");
+        			} else if (!lastaction.equals("generateNotification") ||
+    						lastaction.equals("generateNotification") && !lastlocationid.equals(location_id) && beacon_changed) { // add hour timer here also        					
+        				
         				// only if app is running in background or not running at all.
 
         				// only do this if:
@@ -852,20 +864,16 @@ get lock
         				// ALSO only notify if this location hasn't been notified within last hour.  (still necessary?  not sure...)
         				// (trying without the hour thing for now).
 
-        				if (!lastaction.equals("generateNotification") ||
-        						lastaction.equals("generateNotification") && !lastlocationid.equals(location_id)) { // add hour timer here also        					
         				
-        					// generate notification.
-        					generateNotification("Pay Here",notetext, beaconurl, location_id.toString());// this generates system notification
-        					setNextLaunchUrl(beaconurl);
-        					setNextLaunchName(beaconname);
-        					lastaction = "generateNotification";
-        				}// else {
-        					//Log.e("service","skipping generateNotification because same as last sent event");
-        				//}
+    					// generate notification.
+    					generateNotification("Pay Here",notetext, beaconurl, location_id.toString());// this generates system notification
+    					setNextLaunchUrl(beaconurl);
+    					setNextLaunchName(beaconname);
+    					lastaction = "generateNotification";
+        				Log.e("sending intent","*** notification of new location");
         			}
         			lastlocationid = location_id;
-				}
+				//}
 				// update location_id queue history
     			old_locid2 = old_locid;
     			old_locid = location_id;	
