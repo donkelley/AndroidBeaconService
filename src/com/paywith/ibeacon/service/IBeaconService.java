@@ -689,7 +689,7 @@ get lock
         		// Need this to only happen after several iterations of no beacon found.... 
         		noPaywithBeaconCount = noPaywithBeaconCount + 1; // inc the counter and remove notification if higher than 10 cycles
         		
-        		if (noPaywithBeaconCount > 10) {
+        		if (noPaywithBeaconCount > 3) {
         			// clear all paywith notifications... nothing has been found for 10 cycles
         			NotificationManager notificationManager = (NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
         			notificationManager.cancelAll();
