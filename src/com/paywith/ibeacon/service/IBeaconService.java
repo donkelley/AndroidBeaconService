@@ -496,13 +496,15 @@ get lock
                 // Don't actually wait until the next scan time -- only wait up to 1 second.  this
                 // allows us to start scanning sooner if a consumer enters the foreground and expects
                 // results more quickly
+                // NOTE: Don Kelley - changed back to NOT use the 1 second override.  I hate that...
                 handler.postDelayed(new Runnable() {
                     @Override
                     public void run() {
-                    	Log.e("Service","calling scanLeDevice(true)");
+                    	//Log.e("Service","calling scanLeDevice(true)");
                         scanLeDevice(true);
                     }
-                }, millisecondsUntilStart > 1000 ? 1000 : millisecondsUntilStart);
+                //}, millisecondsUntilStart > 1000 ? 1000 : millisecondsUntilStart); // 1 second max override
+                }, millisecondsUntilStart);
                 return;
             }
 
@@ -675,7 +677,7 @@ get lock
             RangeState rangeState = rangedRegionState.get(region);
             if (IBeaconManager.debug)
                 Log.d(TAG, "Calling ranging callback");
-            rangeState.getCallback().call(IBeaconService.this, "rangingData", new RangingData(rangeState.finalizeIBeacons(), region));
+            //rangeState.getCallback().call(IBeaconService.this, "rangingData", new RangingData(rangeState.finalizeIBeacons(), region));
 
         	//Log.e("iterator",trackedBeacons);
         	IBeacon nearest_beacon = findNearest(trackedBeacons);
@@ -726,7 +728,8 @@ get lock
         	if (!m1.equals(m2) || !M1.equals(M2) || !m2.equals(m3) || !M2.equals(M3)) {
         		// simple debouncer queue:
         		// We only get past this point if beacon found is same as last beacon found and also the one before that.
-        		return;
+        		//return;
+        		// skip this... now that we're reducing the frequency of beacon checks, this will take way too long to happen.
         	}
         	
         	
@@ -844,6 +847,14 @@ get lock
         				// the last thing this service did was NOT send a location id
         				// OR the last thing this service did was NOT send this same location change
 
+        	    		// also add the 3 level debouncer when in foreground to locations list 
+        	    		//Log.e("matching?",m1.toString() + " = " + m2.toString() + ", " + M1.toString() + " = " + M2.toString());
+        	        	if (!m1.equals(m2) || !M1.equals(M2) || !m2.equals(m3) || !M2.equals(M3)) {
+        	        		// simple debouncer queue:
+        	        		// We only get past this point if beacon found is same as last beacon found and also the one before that.
+        	        		return;
+        	        		// skip this... now that we're reducing the frequency of beacon checks, this will take way too long to happen.
+        	        	}
         				//if (!lastaction.equals("moveLocationToTop") || 
         				//		lastaction.equals("moveLocationToTop") && !lastlocationid.equals(location_id)) {
 
@@ -852,10 +863,13 @@ get lock
         					moveLocationToTop(location_id.toString());
         				//}
         				lastaction = "moveLocationToTop";
+        				scanPeriod = IBeaconManager.DEFAULT_FOREGROUND_SCAN_PERIOD;
+        				betweenScanPeriod = IBeaconManager.DEFAULT_FOREGROUND_BETWEEN_SCAN_PERIOD;
+        				//setScanPeriods(scanPeriod,betweenScanPeriod);
         				//Log.e("sending intent","locations list order");
         			} else if (!lastaction.equals("generateNotification") ||
-    						lastaction.equals("generateNotification") && !lastlocationid.equals(location_id) && beacon_changed) { // add hour timer here also        					
-        				
+    						lastaction.equals("generateNotification") && !lastlocationid.equals(location_id)) { // add hour timer here also        					
+        				// && beacon_changed
         				// only if app is running in background or not running at all.
 
         				// only do this if:
@@ -870,7 +884,10 @@ get lock
     					setNextLaunchUrl(beaconurl);
     					setNextLaunchName(beaconname);
     					lastaction = "generateNotification";
-        				Log.e("sending intent","*** notification of new location");
+        				//Log.e("sending intent","*** notification of new location");
+        				scanPeriod = IBeaconManager.DEFAULT_BACKGROUND_SCAN_PERIOD;
+        				betweenScanPeriod = IBeaconManager.DEFAULT_BACKGROUND_BETWEEN_SCAN_PERIOD;
+        				//setScanPeriods(scanPeriod,betweenScanPeriod);
         			}
         			lastlocationid = location_id;
 				//}
@@ -919,7 +936,7 @@ get lock
         trackedBeacons.add(iBeacon);
         if (IBeaconManager.debug)
             Log.d(TAG,"iBeacon detected :" + iBeacon.getProximityUuid() + " " + iBeacon.getMajor() + " " + iBeacon.getMinor());
-        //runAppAPI();
+        
         List<Region> matchedRegions = null;
         synchronized(monitoredRegionState) {
             matchedRegions = matchingRegions(iBeacon,
@@ -927,7 +944,7 @@ get lock
         }
         Iterator<Region> matchedRegionIterator = matchedRegions.iterator();
         while (matchedRegionIterator.hasNext()) {
-        	Log.d(TAG, "looping through region iterator");
+        	//Log.d(TAG, "looping through region iterator");
             Region region = matchedRegionIterator.next();
             MonitorState state = monitoredRegionState.get(region);
             if (state.markInside()) {
@@ -960,8 +977,9 @@ get lock
 
             IBeacon iBeacon = IBeacon.fromScanData(scanData.scanRecord,scanData.rssi, scanData.device);
 
-            if (iBeacon != null)
+            if (iBeacon != null) {
                 processIBeaconFromScan(iBeacon);
+            }
 
             bluetoothCrashResolver.notifyScannedDevice(scanData.device, (BluetoothAdapter.LeScanCallback)getLeScanCallback());
             return null;
@@ -1148,7 +1166,9 @@ get lock
     	return false;
     }
 	
-	protected synchronized IBeacon findNearest(Collection<IBeacon> beacons) {
+	protected synchronized IBeacon findNearest(Collection<IBeacon> beacons2) {
+		
+		Collection<IBeacon> beacons = trackedBeacons;
 		// must convert linkedhashmap to map for looping through data
 		//Map<String, Beacon> beaconsMap = beacons; //beacons
 		//Iterator<Entry<String, Beacon>> beaconIt = beacons.entrySet().iterator();
@@ -1175,7 +1195,7 @@ get lock
 		synchronized (beacons) {
 			
 			for (Iterator<IBeacon> iterator = beacons.iterator(); iterator.hasNext();) {
-				//Log.e("looping through beacons", "findnearest");
+				//Log.e("findnearest","looping through beacons");
 				IBeacon aBeacon = (IBeacon) iterator.next();
 				Integer minor = aBeacon.getMinor();
 				Double aBeaconDistance = aBeacon.getAccuracy();

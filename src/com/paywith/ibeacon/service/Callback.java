@@ -63,7 +63,7 @@ public class Callback {
 			context.startService(intent);		
 			return true;			
 		} else {
-			Log.d(TAG, "iBeacon callback failed due to null intent");			
+			//Log.d(TAG, "iBeacon callback failed due to null intent");			
 		}
 		return false;
 	}
