@@ -690,7 +690,8 @@ get lock
         		noPaywithBeaconCount = noPaywithBeaconCount + 1; // inc the counter and remove notification if higher than 10 cycles
         		
         		if (noPaywithBeaconCount > 3) {
-        			// clear all paywith notifications... nothing has been found for 10 cycles
+        			// clear all paywith notifications and launch url... nothing has been found for 10 cycles
+        			setNextLaunchUrl(null);
         			NotificationManager notificationManager = (NotificationManager)getSystemService(Context.NOTIFICATION_SERVICE);
         			notificationManager.cancelAll();
         			old_locid = 0;
@@ -698,7 +699,6 @@ get lock
         			lastBeaconFound = null;
         			lastBeaconFound2 = null;
         			lastaction = "cancelAll";
-        			setNextLaunchUrl(null);
         		}
         		return;
         	}
@@ -862,6 +862,8 @@ get lock
         					// tell app to move this location to top of location list if possible
         					moveLocationToTop(location_id.toString());
         				//}
+        					//generateNotification("TEST",notetext, beaconurl, location_id.toString());// this generates system notification
+        					
         				lastaction = "moveLocationToTop";
         				scanPeriod = IBeaconManager.DEFAULT_FOREGROUND_SCAN_PERIOD;
         				betweenScanPeriod = IBeaconManager.DEFAULT_FOREGROUND_BETWEEN_SCAN_PERIOD;
@@ -878,6 +880,12 @@ get lock
         				// ALSO only notify if this location hasn't been notified within last hour.  (still necessary?  not sure...)
         				// (trying without the hour thing for now).
 
+        				// simple debouncer targetted at notifications:
+        				if (!m1.equals(m2) || !M1.equals(M2) || !m2.equals(m3) || !M2.equals(M3)) {
+        				//if (m1.equals(m2) && M1.equals(M2) || m1.equals(m3) && M1.equals(M3)) {
+        					// logic:  if this beacon was notified within the past 3 cycles, don't notify again.
+        					return;
+        				}
         				
     					// generate notification.
     					generateNotification("Pay Here",notetext, beaconurl, location_id.toString());// this generates system notification
